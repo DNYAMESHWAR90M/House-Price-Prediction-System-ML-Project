@@ -1,5 +1,5 @@
 import streamlit as st
-import requests
+import pickle
 import pandas as pd
 
 # Page Configuration
@@ -8,6 +8,13 @@ st.set_page_config(
     page_icon="🏠",
     layout="wide"
 )
+
+# Load the trained machine learning model directly
+@st.cache_resource
+def load_model():
+    return pickle.load(open("house_model.pkl", "rb"))
+
+model = load_model()
 
 # Custom CSS for Professional Look
 st.markdown("""
@@ -51,7 +58,6 @@ col1, col2 = st.columns([1.2, 1], gap="large")
 with col1:
     st.subheader("📝 Enter Property Details")
     
-    # Sliders and Selectboxes for better UX
     square_feet = st.slider("Square Feet Area", min_value=300, max_value=10000, value=1500, step=50)
     
     sub_col1, sub_col2 = st.columns(2)
@@ -69,52 +75,46 @@ with col2:
     st.subheader("📊 Valuation & Insights")
     
     if predict_btn:
-        # Prepare API Payload
-        payload = {
+        # Prepare input data for the model
+        input_data = pd.DataFrame([{
             "Square_Feet": square_feet,
             "BHK": int(bhk),
             "Bathrooms": int(bathrooms),
             "Age_Years": age_years,
             "Parking": int(parking)
-        }
+        }])
         
         try:
-            # Requesting FastAPI Backend
-            response = requests.post("http://127.0.0.1:8000/predict", json=payload)
+            # Direct prediction using the loaded model
+            raw_price = float(model.predict(input_data)[0])
+            formatted_price = f"₹ {raw_price:,.2f}"
             
-            if response.status_code == 200:
-                result = response.json()
-                formatted_price = result["formatted_price"]
-                raw_price = result["estimated_price"]
-                
-                # Display Result Card
-                st.markdown(f"""
-                    <div class="metric-card">
-                        <p style='color: #a0aec0; font-size: 1.1rem; margin-bottom: 0;'>Estimated Market Value</p>
-                        <h1 style='color: #48bb78; font-size: 2.6rem; margin-top: 10px;'>{formatted_price}</h1>
-                    </div>
-                """, unsafe_allow_html=True)
-                
-                # Extra Financial Metrics
-                price_per_sqft = raw_price / square_feet
-                st.markdown("### Key Metrics")
-                st.info(f"📌 **Price per Sq.Ft:** ₹ {price_per_sqft:,.2f} / sq.ft")
-                st.success(f"🏡 **Configuration:** {bhk} BHK • {bathrooms} Baths • {parking} Parking • {age_years} Yrs Old")
-                
-                # Download Valuation Report Button
-                report_df = pd.DataFrame([payload])
-                report_df['Estimated_Price'] = formatted_price
-                csv_data = report_df.to_csv(index=False).encode('utf-8-sig')
-                
-                st.download_button(
-                    label="📥 Download Valuation Report (CSV)",
-                    data=csv_data,
-                    file_name="house_valuation_report.csv",
-                    mime="text/csv"
-                )
-            else:
-                st.error("Failed to fetch prediction from FastAPI backend.")
+            # Display Result Card
+            st.markdown(f"""
+                <div class="metric-card">
+                    <p style='color: #a0aec0; font-size: 1.1rem; margin-bottom: 0;'>Estimated Market Value</p>
+                    <h1 style='color: #48bb78; font-size: 2.6rem; margin-top: 10px;'>{formatted_price}</h1>
+                </div>
+            """, unsafe_allow_html=True)
+            
+            # Extra Financial Metrics
+            price_per_sqft = raw_price / square_feet
+            st.markdown("### Key Metrics")
+            st.info(f"📌 **Price per Sq.Ft:** ₹ {price_per_sqft:,.2f} / sq.ft")
+            st.success(f"🏡 **Configuration:** {bhk} BHK • {bathrooms} Baths • {parking} Parking • {age_years} Yrs Old")
+            
+            # Download Valuation Report Button
+            report_df = input_data.copy()
+            report_df['Estimated_Price'] = formatted_price
+            csv_data = report_df.to_csv(index=False).encode('utf-8-sig')
+            
+            st.download_button(
+                label="📥 Download Valuation Report (CSV)",
+                data=csv_data,
+                file_name="house_valuation_report.csv",
+                mime="text/csv"
+            )
         except Exception as e:
-            st.error(f"Connection Error: Make sure your FastAPI server (`api.py`) is running on port 8000! Details: {e}")
+            st.error(f"Prediction Error: {e}")
     else:
         st.info("👈 Adjust the property parameters on the left and click **'Calculate Estimated Price'** to view the live valuation report.")
