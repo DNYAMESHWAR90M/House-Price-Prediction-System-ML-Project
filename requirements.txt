@@ -6,3 +6,8 @@ uvicorn
 pydantic
 streamlit
 requests
+streamlit
+pandas
+scikit-learn
+matplotlib
+requests
