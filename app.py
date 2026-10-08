@@ -1,5 +1,5 @@
 import streamlit as st
-import requests
+import pickle
 import pandas as pd
 import matplotlib.pyplot as plt
 
@@ -9,6 +9,21 @@ st.set_page_config(
     page_icon="🏢",
     layout="wide"
 )
+
+# Load the trained machine learning model directly
+@st.cache_resource
+def load_model():
+    return pickle.load(open("house_model.pkl", "rb"))
+
+model = load_model()
+
+# Location Multipliers mapping
+LOCATION_MULTIPLIERS = {
+    "Suburbs (Standard)": 1.0,
+    "City Center (Prime Location)": 1.25,
+    "IT Park / Tech Zone": 1.35,
+    "Greenwood Outskirts": 0.9
+}
 
 # Custom SaaS-style Professional CSS
 st.markdown("""
@@ -33,20 +48,6 @@ st.markdown("""
         background: linear-gradient(135deg, #4f46e5 0%, #4338ca 100%);
         box-shadow: 0 6px 16px rgba(99, 102, 241, 0.6);
     }
-    .metric-card {
-        background: #111827;
-        padding: 24px;
-        border-radius: 12px;
-        border: 1px solid #1f2937;
-        text-align: center;
-        box-shadow: 0 4px 20px rgba(0,0,0,0.5);
-    }
-    .tab-content {
-        background-color: #111827;
-        padding: 20px;
-        border-radius: 10px;
-        border: 1px solid #1f2937;
-    }
     </style>
 """, unsafe_allow_html=True)
 
@@ -58,19 +59,12 @@ st.markdown("""
     </div>
 """, unsafe_allow_html=True)
 
-# --- SIDEBAR INPUTS (App-like Experience) ---
+# --- SIDEBAR INPUTS ---
 with st.sidebar:
     st.header("🎛️ Control Panel")
     st.markdown("Configure property parameters:")
     
-    location_options = {
-        "Suburbs (Standard)": 1.0,
-        "City Center (Prime Location)": 1.25,
-        "IT Park / Tech Zone": 1.35,
-        "Greenwood Outskirts": 0.9
-    }
-    selected_location = st.selectbox("📍 Neighborhood / Zone", list(location_options.keys()))
-    
+    selected_location = st.selectbox("📍 Neighborhood / Zone", list(LOCATION_MULTIPLIERS.keys()))
     square_feet = st.slider("📐 Area (Square Feet)", min_value=300, max_value=10000, value=1500, step=50)
     
     col_s1, col_s2 = st.columns(2)
@@ -86,88 +80,86 @@ with st.sidebar:
 
 # --- MAIN DASHBOARD AREA ---
 if predict_btn:
-    payload = {
+    # Prepare input data for the model
+    input_data = pd.DataFrame([{
         "Square_Feet": square_feet,
         "BHK": int(bhk),
         "Bathrooms": int(bathrooms),
         "Age_Years": age_years,
-        "Parking": int(parking),
-        "Location": selected_location
-    }
+        "Parking": int(parking)
+    }])
     
     try:
-        response = requests.post("http://127.0.0.1:8000/predict", json=payload)
+        # Direct prediction using the loaded model
+        base_price = float(model.predict(input_data)[0])
+        multiplier = LOCATION_MULTIPLIERS.get(selected_location, 1.0)
+        raw_price = base_price * multiplier
         
-        if response.status_code == 200:
-            result = response.json()
-            formatted_price = result["formatted_price"]
-            raw_price = result["estimated_price"]
-            price_per_sqft = raw_price / square_feet
+        formatted_price = f"₹ {raw_price:,.2f}"
+        price_per_sqft = raw_price / square_feet
+        
+        # Top Summary Metrics Row
+        m1, m2, m3 = st.columns(3)
+        with m1:
+            st.metric(label="Estimated Valuation", value=formatted_price, delta="AI Verified")
+        with m2:
+            st.metric(label="Unit Rate / Sq.Ft", value=f"₹ {price_per_sqft:,.2f}")
+        with m3:
+            st.metric(label="Selected Zone", value=selected_location.split()[0])
+        
+        st.markdown("")
+        
+        # Tabs for Analytics
+        tab1, tab2, tab3 = st.tabs(["📈 Market Comparison", "💳 Financial & EMI Planner", "🏡 Similar Property Matches"])
+        
+        with tab1:
+            st.markdown("### Comparative Market Analysis")
+            fig, ax = plt.subplots(figsize=(7, 3.2))
+            fig.patch.set_facecolor('#111827')
+            ax.set_facecolor('#0b0f19')
             
-            # Top Summary Metrics Row
-            m1, m2, m3 = st.columns(3)
-            with m1:
-                st.metric(label="Estimated Valuation", value=formatted_price, delta="AI Verified")
-            with m2:
-                st.metric(label="Unit Rate / Sq.Ft", value=f"₹ {price_per_sqft:,.2f}")
-            with m3:
-                st.metric(label="Selected Zone", value=selected_location.split()[0])
+            categories = ['Min Market', 'Your Property Estimate', 'Prime High-End']
+            prices = [raw_price * 0.85, raw_price, raw_price * 1.2]
+            ax.bar(categories, prices, color=['#38bdf8', '#34d399', '#f87171'], width=0.5)
             
-            st.markdown("")
-            
-            # Tabs for Analytics
-            tab1, tab2, tab3 = st.tabs(["📈 Market Comparison", "💳 Financial & EMI Planner", "🏡 Similar Property Matches"])
-            
-            with tab1:
-                st.markdown("### Comparative Market Analysis")
-                fig, ax = plt.subplots(figsize=(7, 3.2))
-                fig.patch.set_facecolor('#111827')
-                ax.set_facecolor('#0b0f19')
-                
-                categories = ['Min Market', 'Your Property Estimate', 'Prime High-End']
-                prices = [raw_price * 0.85, raw_price, raw_price * 1.2]
-                bars = ax.bar(categories, prices, color=['#38bdf8', '#34d399', '#f87171'], width=0.5)
-                
-                ax.set_ylabel('Price in ₹', color='white')
-                ax.tick_params(colors='white')
-                for spine in ax.spines.values():
-                    spine.set_color('#374151')
-                st.pyplot(fig)
+            ax.set_ylabel('Price in ₹', color='white')
+            ax.tick_params(colors='white')
+            for spine in ax.spines.values():
+                spine.set_color('#374151')
+            st.pyplot(fig)
 
-            with tab2:
-                st.markdown("### Home Loan & Monthly EMI Estimator")
-                col_f1, col_f2 = st.columns(2)
-                with col_f1:
-                    down_payment_pct = st.slider("Down Payment (%)", 10, 50, 20, 5)
-                    loan_years = st.slider("Tenure (Years)", 5, 30, 20, 1)
-                with col_f2:
-                    interest_rate = st.slider("Interest Rate (% p.a.)", 6.0, 15.0, 8.5, 0.5)
-                
-                loan_amount = raw_price * (1 - down_payment_pct / 100)
-                monthly_ir = (interest_rate / 12) / 100
-                months = loan_years * 12
-                emi = (loan_amount * monthly_ir * (1 + monthly_ir)**months) / ((1 + monthly_ir)**months - 1)
-                
-                st.success(f"💳 **Calculated Monthly EMI:** ₹ {emi:,.2f} / month  *(Loan Principal: ₹ {loan_amount:,.2f})*")
+        with tab2:
+            st.markdown("### Home Loan & Monthly EMI Estimator")
+            col_f1, col_f2 = st.columns(2)
+            with col_f1:
+                down_payment_pct = st.slider("Down Payment (%)", 10, 50, 20, 5)
+                loan_years = st.slider("Tenure (Years)", 5, 30, 20, 1)
+            with col_f2:
+                interest_rate = st.slider("Interest Rate (% p.a.)", 6.0, 15.0, 8.5, 0.5)
+            
+            loan_amount = raw_price * (1 - down_payment_pct / 100)
+            monthly_ir = (interest_rate / 12) / 100
+            months = loan_years * 12
+            emi = (loan_amount * monthly_ir * (1 + monthly_ir)**months) / ((1 + monthly_ir)**months - 1)
+            
+            st.success(f"💳 **Calculated Monthly EMI:** ₹ {emi:,.2f} / month  *(Loan Principal: ₹ {loan_amount:,.2f})*")
 
-            with tab3:
-                st.markdown("### Verified Comparable Listings")
-                col_l1, col_l2 = st.columns(2)
-                with col_l1:
-                    st.info(f"🏢 **Elite {bhk} BHK Luxury Apartment**\n\n 📐 {square_feet + 120} sq.ft | 💰 ₹ {raw_price * 1.04:,.2f}")
-                with col_l2:
-                    st.info(f"🏡 **Spacious Independent Villa**\n\n 📐 {square_feet + 350} sq.ft | 💰 ₹ {raw_price * 1.18:,.2f}")
-            
-            st.markdown("---")
-            report_df = pd.DataFrame([payload])
-            report_df['Estimated_Price'] = formatted_price
-            csv_data = report_df.to_csv(index=False).encode('utf-8-sig')
-            st.download_button("📥 Download Enterprise Valuation Report (CSV)", data=csv_data, file_name="enterprise_property_report.csv", mime="text/csv")
-            
-        else:
-            st.error("Backend API connection failed.")
+        with tab3:
+            st.markdown("### Verified Comparable Listings")
+            col_l1, col_l2 = st.columns(2)
+            with col_l1:
+                st.info(f"🏢 **Elite {bhk} BHK Luxury Apartment**\n\n 📐 {square_feet + 120} sq.ft | 💰 ₹ {raw_price * 1.04:,.2f}")
+            with col_l2:
+                st.info(f"🏡 **Spacious Independent Villa**\n\n 📐 {square_feet + 350} sq.ft | 💰 ₹ {raw_price * 1.18:,.2f}")
+        
+        st.markdown("---")
+        report_df = input_data.copy()
+        report_df['Location'] = selected_location
+        report_df['Estimated_Price'] = formatted_price
+        csv_data = report_df.to_csv(index=False).encode('utf-8-sig')
+        st.download_button("📥 Download Enterprise Valuation Report (CSV)", data=csv_data, file_name="enterprise_property_report.csv", mime="text/csv")
+        
     except Exception as e:
-        st.error(f"Error: {e}")
+        st.error(f"Prediction Error: {e}")
 else:
-    # Default Welcome Screen
     st.info("👈 Use the **Control Panel** in the sidebar to configure property specs and click **'Calculate Valuation'** to launch the intelligence suite.")
